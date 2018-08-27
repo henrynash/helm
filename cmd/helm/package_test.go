@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors All rights reserved.
+Copyright The Helm Authors.
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -26,8 +26,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"k8s.io/helm/pkg/chart"
+	"k8s.io/helm/pkg/chart/loader"
 	"k8s.io/helm/pkg/chartutil"
-	"k8s.io/helm/pkg/hapi/chart"
 	"k8s.io/helm/pkg/helm/helmpath"
 )
 
@@ -206,7 +207,7 @@ func TestSetAppVersion(t *testing.T) {
 	tmp := testTempDir(t)
 
 	hh := testHelmHome(t)
-	settings.Home = helmpath.Home(hh)
+	settings.Home = hh
 
 	c := newPackageCmd(&bytes.Buffer{})
 	flags := map[string]string{
@@ -224,7 +225,7 @@ func TestSetAppVersion(t *testing.T) {
 	} else if fi.Size() == 0 {
 		t.Errorf("file %q has zero bytes.", chartPath)
 	}
-	ch, err := chartutil.Load(chartPath)
+	ch, err := loader.Load(chartPath)
 	if err != nil {
 		t.Errorf("unexpected error loading packaged chart: %v", err)
 	}
@@ -332,7 +333,7 @@ func createValuesFile(t *testing.T, data string) string {
 
 func getChartValues(chartPath string) (chartutil.Values, error) {
 
-	chart, err := chartutil.Load(chartPath)
+	chart, err := loader.Load(chartPath)
 	if err != nil {
 		return nil, err
 	}

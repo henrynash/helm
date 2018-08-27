@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors All rights reserved.
+Copyright The Helm Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,9 +30,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/discovery"
 
+	"k8s.io/helm/pkg/chart"
 	"k8s.io/helm/pkg/chartutil"
+	"k8s.io/helm/pkg/engine"
 	"k8s.io/helm/pkg/hapi"
-	"k8s.io/helm/pkg/hapi/chart"
 	"k8s.io/helm/pkg/hapi/release"
 	"k8s.io/helm/pkg/hooks"
 	relutil "k8s.io/helm/pkg/releaseutil"
@@ -78,7 +80,7 @@ var ValidName = regexp.MustCompile("^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])+
 
 // ReleaseServer implements the server-side gRPC endpoint for the HAPI services.
 type ReleaseServer struct {
-	env       *environment.Environment
+	engine    Engine
 	discovery discovery.DiscoveryInterface
 
 	// Releases stores records of releases.
@@ -90,9 +92,9 @@ type ReleaseServer struct {
 }
 
 // NewReleaseServer creates a new release server.
-func NewReleaseServer(env *environment.Environment, discovery discovery.DiscoveryInterface, kubeClient environment.KubeClient) *ReleaseServer {
+func NewReleaseServer(discovery discovery.DiscoveryInterface, kubeClient environment.KubeClient) *ReleaseServer {
 	return &ReleaseServer{
-		env:        env,
+		engine:     engine.New(),
 		discovery:  discovery,
 		Releases:   storage.Init(driver.NewMemory()),
 		KubeClient: kubeClient,
@@ -177,7 +179,7 @@ func (s *ReleaseServer) uniqName(start string, reuse bool) (string, error) {
 		relutil.Reverse(h, relutil.SortByRevision)
 		rel := h[0]
 
-		if st := rel.Info.Status; reuse && (st == release.StatusDeleted || st == release.StatusFailed) {
+		if st := rel.Info.Status; reuse && (st == release.StatusUninstalled || st == release.StatusFailed) {
 			// Allowe re-use of names if the previous release is marked deleted.
 			s.Log("name %s exists but is not in use, reusing name", start)
 			return start, nil
@@ -202,18 +204,6 @@ func (s *ReleaseServer) uniqName(start string, reuse bool) (string, error) {
 	}
 	s.Log("warning: No available release names found after %d tries", maxTries)
 	return "ERROR", errors.New("no available release name found")
-}
-
-func (s *ReleaseServer) engine(ch *chart.Chart) environment.Engine {
-	renderer := s.env.EngineYard.Default()
-	if ch.Metadata.Engine != "" {
-		if r, ok := s.env.EngineYard.Get(ch.Metadata.Engine); ok {
-			renderer = r
-		} else {
-			s.Log("warning: %s requested non-existent template engine %s", ch.Metadata.Name, ch.Metadata.Engine)
-		}
-	}
-	return renderer
 }
 
 // capabilities builds a Capabilities from discovery information.
@@ -269,9 +259,8 @@ func (s *ReleaseServer) renderResources(ch *chart.Chart, values chartutil.Values
 		}
 	}
 
-	s.Log("rendering %s chart using values", ch.Metadata.Name)
-	renderer := s.engine(ch)
-	files, err := renderer.Render(ch, values)
+	s.Log("rendering %s chart using values", ch.Name())
+	files, err := s.engine.Render(ch, values)
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -286,7 +275,7 @@ func (s *ReleaseServer) renderResources(ch *chart.Chart, values chartutil.Values
 		if strings.HasSuffix(k, notesFileSuffix) {
 			// Only apply the notes if it belongs to the parent chart
 			// Note: Do not use filePath.Join since it creates a path with \ which is not expected
-			if k == path.Join(ch.Metadata.Name, "templates", notesFileSuffix) {
+			if k == path.Join(ch.Name(), "templates", notesFileSuffix) {
 				notes = v
 			}
 			delete(files, k)
@@ -296,7 +285,7 @@ func (s *ReleaseServer) renderResources(ch *chart.Chart, values chartutil.Values
 	// Sort hooks, manifests, and partials. Only hooks and manifests are returned,
 	// as partials are not used after renderer.Render. Empty manifests are also
 	// removed here.
-	hooks, manifests, err := sortManifests(files, vs, InstallOrder)
+	hooks, manifests, err := SortManifests(files, vs, InstallOrder)
 	if err != nil {
 		// By catching parse errors here, we can prevent bogus releases from going
 		// to Kubernetes.
@@ -351,7 +340,7 @@ func (s *ReleaseServer) execHook(hs []*release.Hook, name, namespace, hook strin
 		}
 	}
 
-	executingHooks = sortByHookWeight(executingHooks)
+	sort.Sort(hookByWeight(executingHooks))
 
 	for _, h := range executingHooks {
 		if err := s.deleteHookIfShouldBeDeletedByDeletePolicy(h, hooks.BeforeHookCreation, name, namespace, hook, s.KubeClient); err != nil {

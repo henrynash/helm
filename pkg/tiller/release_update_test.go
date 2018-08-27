@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors All rights reserved.
+Copyright The Helm Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/helm/pkg/chart"
 	"k8s.io/helm/pkg/hapi"
-	"k8s.io/helm/pkg/hapi/chart"
 	"k8s.io/helm/pkg/hapi/release"
 )
 
@@ -366,7 +366,7 @@ func TestUpdateReleaseFailure_Force(t *testing.T) {
 	if err != nil {
 		t.Errorf("Expected to be able to get previous release")
 	}
-	if oldStatus := oldRelease.Info.Status; oldStatus != release.StatusDeleted {
+	if oldStatus := oldRelease.Info.Status; oldStatus != release.StatusUninstalled {
 		t.Errorf("Expected Deleted status on previous Release version. Got %v", oldStatus)
 	}
 }

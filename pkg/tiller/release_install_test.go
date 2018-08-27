@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors All rights reserved.
+Copyright The Helm Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -314,7 +314,7 @@ func TestInstallRelease_ReuseName(t *testing.T) {
 	rs := rsFixture(t)
 	rs.Log = t.Logf
 	rel := releaseStub()
-	rel.Info.Status = release.StatusDeleted
+	rel.Info.Status = release.StatusUninstalled
 	rs.Releases.Create(rel)
 
 	req := installRequest(

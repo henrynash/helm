@@ -1,5 +1,5 @@
 /*
-Copyright 2016 The Kubernetes Authors All rights reserved.
+Copyright The Helm Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,20 +23,10 @@ import (
 	"time"
 
 	"k8s.io/kubernetes/pkg/apis/core"
-	"k8s.io/kubernetes/pkg/kubectl/resource"
+	"k8s.io/kubernetes/pkg/kubectl/genericclioptions/resource"
 
-	"k8s.io/helm/pkg/chartutil"
-	"k8s.io/helm/pkg/hapi/chart"
 	"k8s.io/helm/pkg/kube"
 )
-
-type mockEngine struct {
-	out map[string]string
-}
-
-func (e *mockEngine) Render(chrt *chart.Chart, v chartutil.Values) (map[string]string, error) {
-	return e.out, nil
-}
 
 type mockKubeClient struct{}
 
@@ -69,24 +59,8 @@ func (k *mockKubeClient) WaitAndGetCompletedPodStatus(namespace string, reader i
 	return "", nil
 }
 
-var _ Engine = &mockEngine{}
 var _ KubeClient = &mockKubeClient{}
 var _ KubeClient = &PrintingKubeClient{}
-
-func TestEngine(t *testing.T) {
-	eng := &mockEngine{out: map[string]string{"albatross": "test"}}
-
-	env := New()
-	env.EngineYard = EngineYard(map[string]Engine{"test": eng})
-
-	if engine, ok := env.EngineYard.Get("test"); !ok {
-		t.Errorf("failed to get engine from EngineYard")
-	} else if out, err := engine.Render(&chart.Chart{}, map[string]interface{}{}); err != nil {
-		t.Errorf("unexpected template error: %s", err)
-	} else if out["albatross"] != "test" {
-		t.Errorf("expected 'test', got %q", out["albatross"])
-	}
-}
 
 func TestKubeClient(t *testing.T) {
 	kc := &mockKubeClient{}
