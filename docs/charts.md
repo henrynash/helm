@@ -265,7 +265,7 @@ dependencies:
       - name: subchart1
         repository: http://localhost:10191
         version: 0.1.0
-        condition: subchart1.enabled, global.subchart1.enabled
+        condition: subchart1.enabled,global.subchart1.enabled
         tags:
           - front-end
           - subchart1
@@ -303,7 +303,6 @@ The `--set` parameter can be used as usual to alter tag and condition values.
 
 ````
 helm install --set tags.front-end=true --set subchart2.enabled=false
-
 ````
 
 ##### Tags and Condition Resolution
@@ -527,15 +526,15 @@ metadata:
   name: deis-database
   namespace: deis
   labels:
-    heritage: deis
+    app.kubernetes.io/managed-by: deis
 spec:
   replicas: 1
   selector:
-    app: deis-database
+    app.kubernetes.io/name: deis-database
   template:
     metadata:
       labels:
-        app: deis-database
+        app.kubernetes.io/name: deis-database
     spec:
       serviceAccount: deis-database
       containers:
@@ -664,15 +663,15 @@ metadata:
   name: deis-database
   namespace: deis
   labels:
-    heritage: deis
+    app.kubernetes.io/managed-by: deis
 spec:
   replicas: 1
   selector:
-    app: deis-database
+    app.kubernetes.io/name: deis-database
   template:
     metadata:
       labels:
-        app: deis-database
+        app.kubernetes.io/name: deis-database
     spec:
       serviceAccount: deis-database
       containers:
