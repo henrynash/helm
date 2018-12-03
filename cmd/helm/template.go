@@ -27,17 +27,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Masterminds/semver"
 	"github.com/spf13/cobra"
 
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/helm/pkg/chartutil"
-	"k8s.io/helm/pkg/engine"
+	"k8s.io/helm/pkg/manifest"
 	"k8s.io/helm/pkg/proto/hapi/chart"
 	"k8s.io/helm/pkg/proto/hapi/release"
-	util "k8s.io/helm/pkg/releaseutil"
+	"k8s.io/helm/pkg/renderutil"
 	"k8s.io/helm/pkg/tiller"
 	"k8s.io/helm/pkg/timeconv"
-	tversion "k8s.io/helm/pkg/version"
 )
 
 const defaultDirectoryPermission = 0755
@@ -94,7 +93,7 @@ func newTemplateCmd(out io.Writer) *cobra.Command {
 
 	f := cmd.Flags()
 	f.BoolVar(&t.showNotes, "notes", false, "show the computed NOTES.txt file as well")
-	f.StringVarP(&t.releaseName, "name", "n", "RELEASE-NAME", "release name")
+	f.StringVarP(&t.releaseName, "name", "n", "release-name", "release name")
 	f.BoolVar(&t.releaseIsUpgrade, "is-upgrade", false, "set .Release.IsUpgrade instead of .Release.IsInstall")
 	f.StringArrayVarP(&t.renderFiles, "execute", "x", []string{}, "only execute the given templates")
 	f.VarP(&t.valueFiles, "values", "f", "specify values in a YAML file (can specify multiple)")
@@ -148,74 +147,30 @@ func (t *templateCmd) run(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if msgs := validation.IsDNS1123Label(t.releaseName); t.releaseName != "" && len(msgs) > 0 {
+		return fmt.Errorf("release name %s is not a valid DNS label: %s", t.releaseName, strings.Join(msgs, ";"))
+	}
+
 	// Check chart requirements to make sure all dependencies are present in /charts
 	c, err := chartutil.Load(t.chartPath)
 	if err != nil {
 		return prettyError(err)
 	}
 
-	if req, err := chartutil.LoadRequirements(c); err == nil {
-		if err := checkDependencies(c, req); err != nil {
-			return prettyError(err)
-		}
-	} else if err != chartutil.ErrRequirementsNotFound {
-		return fmt.Errorf("cannot load requirements: %v", err)
-	}
-	options := chartutil.ReleaseOptions{
-		Name:      t.releaseName,
-		IsInstall: !t.releaseIsUpgrade,
-		IsUpgrade: t.releaseIsUpgrade,
-		Time:      timeconv.Now(),
-		Namespace: t.namespace,
+	renderOpts := renderutil.Options{
+		ReleaseOptions: chartutil.ReleaseOptions{
+			Name:      t.releaseName,
+			IsInstall: !t.releaseIsUpgrade,
+			IsUpgrade: t.releaseIsUpgrade,
+			Time:      timeconv.Now(),
+			Namespace: t.namespace,
+		},
+		KubeVersion: t.kubeVersion,
 	}
 
-	err = chartutil.ProcessRequirementsEnabled(c, config)
+	renderedTemplates, err := renderutil.Render(c, config, renderOpts)
 	if err != nil {
 		return err
-	}
-	err = chartutil.ProcessRequirementsImportValues(c)
-	if err != nil {
-		return err
-	}
-
-	// Set up engine.
-	renderer := engine.New()
-
-	caps := &chartutil.Capabilities{
-		APIVersions:   chartutil.DefaultVersionSet,
-		KubeVersion:   chartutil.DefaultKubeVersion,
-		TillerVersion: tversion.GetVersionProto(),
-	}
-
-	// kubernetes version
-	kv, err := semver.NewVersion(t.kubeVersion)
-	if err != nil {
-		return fmt.Errorf("could not parse a kubernetes version: %v", err)
-	}
-	caps.KubeVersion.Major = fmt.Sprint(kv.Major())
-	caps.KubeVersion.Minor = fmt.Sprint(kv.Minor())
-	caps.KubeVersion.GitVersion = fmt.Sprintf("v%d.%d.0", kv.Major(), kv.Minor())
-
-	vals, err := chartutil.ToRenderValuesCaps(c, config, options, caps)
-	if err != nil {
-		return err
-	}
-
-	out, err := renderer.Render(c, vals)
-	listManifests := []tiller.Manifest{}
-	if err != nil {
-		return err
-	}
-	// extract kind and name
-	re := regexp.MustCompile("kind:(.*)\n")
-	for k, v := range out {
-		match := re.FindStringSubmatch(v)
-		h := "Unknown"
-		if len(match) == 2 {
-			h = strings.TrimSpace(match[1])
-		}
-		m := tiller.Manifest{Name: k, Content: v, Head: &util.SimpleHead{Kind: h}}
-		listManifests = append(listManifests, m)
 	}
 
 	if settings.Debug {
@@ -230,7 +185,8 @@ func (t *templateCmd) run(cmd *cobra.Command, args []string) error {
 		printRelease(os.Stdout, rel)
 	}
 
-	var manifestsToRender []tiller.Manifest
+	listManifests := manifest.SplitManifests(renderedTemplates)
+	var manifestsToRender []manifest.Manifest
 
 	// if we have a list of files to render, then check that each of the
 	// provided files exists in the chart.

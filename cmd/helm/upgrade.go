@@ -25,7 +25,8 @@ import (
 
 	"k8s.io/helm/pkg/chartutil"
 	"k8s.io/helm/pkg/helm"
-	"k8s.io/helm/pkg/storage/driver"
+	"k8s.io/helm/pkg/renderutil"
+	storageerrors "k8s.io/helm/pkg/storage/errors"
 )
 
 const upgradeDesc = `
@@ -146,6 +147,7 @@ func newUpgradeCmd(client helm.Interface, out io.Writer) *cobra.Command {
 	}
 
 	f := cmd.Flags()
+	settings.AddFlagsTLS(f)
 	f.VarP(&upgrade.valueFiles, "values", "f", "specify values in a YAML file or a URL(can specify multiple)")
 	f.BoolVar(&upgrade.dryRun, "dry-run", false, "simulate an upgrade")
 	f.BoolVar(&upgrade.recreate, "recreate-pods", false, "performs pods restart for the resource if applicable")
@@ -174,6 +176,9 @@ func newUpgradeCmd(client helm.Interface, out io.Writer) *cobra.Command {
 	f.StringVar(&upgrade.description, "description", "", "specify the description to use for the upgrade, rather than the default")
 
 	f.MarkDeprecated("disable-hooks", "use --no-hooks instead")
+
+	// set defaults from environment
+	settings.InitTLS(f)
 
 	return cmd
 }
@@ -206,7 +211,7 @@ func (u *upgradeCmd) run() error {
 			}
 		}
 
-		if err != nil && strings.Contains(err.Error(), driver.ErrReleaseNotFound(u.release).Error()) {
+		if err != nil && strings.Contains(err.Error(), storageerrors.ErrReleaseNotFound(u.release).Error()) {
 			fmt.Fprintf(u.out, "Release %q does not exist. Installing it now.\n", u.release)
 			ic := &installCmd{
 				chartPath:    chartPath,
@@ -238,7 +243,7 @@ func (u *upgradeCmd) run() error {
 	// Check chart requirements to make sure all dependencies are present in /charts
 	if ch, err := chartutil.Load(chartPath); err == nil {
 		if req, err := chartutil.LoadRequirements(ch); err == nil {
-			if err := checkDependencies(ch, req); err != nil {
+			if err := renderutil.CheckDependencies(ch, req); err != nil {
 				return err
 			}
 		} else if err != chartutil.ErrRequirementsNotFound {
